@@ -296,9 +296,13 @@ int hybris_gbm_bo_get_plane_count(struct gbm_bo *bo)
 
 int hybris_gbm_bo_get_fd_for_plane(struct gbm_bo *bo, int plane)
 {
-//TBD and rename to bo_get_plane_fd
-   printf("[libgbm-hybris] gbm_bo_get_fd_for_plane called\n");
-   return 0;
+    if (plane != 0) {
+        fprintf(stderr, "[libgbm-hybris] Error: requested plane %d, only 0 is supported\n", plane);
+        errno = EINVAL;
+        return -1;
+    }
+
+    return hybris_gbm_bo_get_fd(bo);
 }
 
 uint32_t hybris_bo_get_offset(struct gbm_bo *bo, int plane)
@@ -396,6 +400,7 @@ static struct gbm_device *hybris_device_create(int fd, uint32_t gbm_backend_vers
    device->v0.bo_get_stride = hybris_gbm_bo_get_stride;
    device->v0.bo_get_modifier = hybris_gbm_bo_get_modifier;
    device->v0.bo_get_planes = hybris_gbm_bo_get_plane_count;
+   device->v0.bo_get_plane_fd = hybris_gbm_bo_get_fd_for_plane;
    device->v0.surface_create = hybris_gbm_surface_create;
    device->v0.bo_get_offset = hybris_bo_get_offset;
    return device;
