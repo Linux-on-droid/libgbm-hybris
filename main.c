@@ -109,6 +109,8 @@ static int get_hal_pixel_format(uint32_t gbm_format)
     return format;
 }
 
+int hybris_gbm_bo_get_fd(struct gbm_bo* _bo);
+
 struct gbm_bo* hybris_gbm_bo_create(struct gbm_device* device, uint32_t width, uint32_t height, uint32_t format, uint32_t flags, const uint64_t *modifiers, const unsigned int count) {
     if (!device) {
         fprintf(stderr, "[libgbm-hybris] Invalid GBM device.\n");
@@ -154,7 +156,7 @@ struct gbm_bo* hybris_gbm_bo_create(struct gbm_device* device, uint32_t width, u
     int ret = ioctl(device->v0.fd, DRM_IOCTL_EVDI_GBM_CREATE_BUFF, &cmd);
 
     bo->base.v0.stride = stride;
-
+    bo->base.v0.handle.u32 = hybris_gbm_bo_get_fd(&bo->base);
     return &bo->base;
 }
 
@@ -175,6 +177,7 @@ static void hybris_gbm_bo_destroy(struct gbm_bo *_bo)
 //    native_handle_close(bo->handle);
 //    native_handle_delete(bo->handle);
 //}
+    close(_bo->v0.handle.u32);
     free(bo);
 }
 
@@ -287,6 +290,13 @@ int hybris_gbm_bo_get_fd(struct gbm_bo* _bo) {
    return fd;
 }
 
+static union gbm_bo_handle hybris_gbm_bo_get_handle_for_plane(struct gbm_bo *_bo, int plane)
+{
+    union gbm_bo_handle handle;
+    handle.u32 = hybris_gbm_bo_get_fd(_bo);
+    return handle;
+}
+
 int hybris_gbm_bo_get_plane_count(struct gbm_bo *bo)
 {
 //TBD and rename to bo_get_planes
@@ -397,6 +407,7 @@ static struct gbm_device *hybris_device_create(int fd, uint32_t gbm_backend_vers
    device->v0.bo_destroy = hybris_gbm_bo_destroy;
    device->v0.destroy = hybris_gbm_device_destroy;
    device->v0.bo_get_fd = hybris_gbm_bo_get_fd;
+   device->v0.bo_get_handle = hybris_gbm_bo_get_handle_for_plane;
    device->v0.bo_get_stride = hybris_gbm_bo_get_stride;
    device->v0.bo_get_modifier = hybris_gbm_bo_get_modifier;
    device->v0.bo_get_planes = hybris_gbm_bo_get_plane_count;
