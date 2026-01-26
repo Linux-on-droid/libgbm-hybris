@@ -8,4 +8,4 @@ Standards-Version: 4.6.2
 Package: libgbm-hybris
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends} libhybris
-Description: A libgm plugin to support libhybris
+Description: A libgbm plugin to support libhybris
