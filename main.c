@@ -156,7 +156,7 @@ struct gbm_bo* hybris_gbm_bo_create(struct gbm_device* device, uint32_t width, u
     cmd.id = &bo->evdi_lindroid_buff_id;
     int ret = ioctl(device->v0.fd, DRM_IOCTL_EVDI_GBM_CREATE_BUFF, &cmd);
 
-    bo->base.v0.stride = stride;
+    bo->base.v0.stride = stride * 4;
     bo->base.v0.handle.u32 = hybris_gbm_bo_get_fd(&bo->base);
     return &bo->base;
 }
@@ -216,7 +216,7 @@ struct gbm_bo *hybris_gbm_bo_import(struct gbm_device *gbm, uint32_t type, void 
 // Suprisingly not part of libgbm
 uint32_t hybris_gbm_bo_get_stride(struct gbm_bo* bo, int plane) {
     // x4 the stride, as it's checked by drm and drm expexcts stride to be at very least width*bpp
-    return bo ? (uint32_t)(bo->v0.stride * 4) : 0;
+    return bo ? (uint32_t)(bo->v0.stride) : 0;
 }
 
 uint32_t hybris_gbm_bo_get_stride_for_plane(struct gbm_bo *bo, int plane)
