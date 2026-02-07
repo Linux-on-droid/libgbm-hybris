@@ -164,20 +164,14 @@ struct gbm_bo* hybris_gbm_bo_create(struct gbm_device* device, uint32_t width, u
 static void hybris_gbm_bo_destroy(struct gbm_bo *_bo)
 {
     struct gbm_hybris_bo *bo = gbm_hybris_bo(_bo);
-//    if (bo->handle) {
-  //      hybris_gralloc_release(bo->handle, 1);
     struct drm_evdi_gbm_del_buff close_args = {
         .id = bo->evdi_lindroid_buff_id
     };
 
-//    if (ioctl(bo->base.gbm->v0.fd, DRM_IOCTL_EVDI_GBM_DEL_BUFF, &close_args) < 0) {
-  //      perror("[libgbm-hybris] DRM_IOCTL_GEM_CLOSE failed");
-    //} else {
-//        printf("[libgbm-hybris]  Released GEM buffer with handle %u\n",  bo->evdi_lindroid_buff_id);
-  //  }
-//    native_handle_close(bo->handle);
-//    native_handle_delete(bo->handle);
-//}
+    if (ioctl(bo->base.gbm->v0.fd, DRM_IOCTL_EVDI_GBM_DEL_BUFF, &close_args) < 0) {
+        perror("[libgbm-hybris] DRM_IOCTL_GEM_CLOSE failed");
+    }
+
     close(_bo->v0.handle.u32);
     free(bo);
 }
