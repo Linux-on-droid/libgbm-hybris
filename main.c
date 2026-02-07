@@ -157,7 +157,7 @@ struct gbm_bo* hybris_gbm_bo_create(struct gbm_device* device, uint32_t width, u
     int ret = ioctl(device->v0.fd, DRM_IOCTL_EVDI_GBM_CREATE_BUFF, &cmd);
 
     bo->base.v0.stride = stride * 4;
-    bo->base.v0.handle.u32 = hybris_gbm_bo_get_fd(&bo->base);
+    bo->base.v0.handle.u32 = bo->evdi_lindroid_buff_id;
     return &bo->base;
 }
 
@@ -300,7 +300,24 @@ int hybris_gbm_bo_get_fd(struct gbm_bo* _bo) {
 static union gbm_bo_handle hybris_gbm_bo_get_handle_for_plane(struct gbm_bo *_bo, int plane)
 {
     union gbm_bo_handle handle;
-    handle.u32 = hybris_gbm_bo_get_fd(_bo);
+
+    if(plane != 0) {
+       printf("[libgbm-hybris] hybris_gbm_bo_get_handle_for_plane non 0 plane not supported\n");
+       return handle;
+    }
+
+    struct gbm_hybris_bo *bo = gbm_hybris_bo(_bo);
+    if(!bo) {
+        printf("[libgbm-hybris] gbm_bo_get_fd missing bo->handle\n");
+        return handle;
+    }
+
+    if(bo->evdi_lindroid_buff_id == -1) {
+        printf("[libgbm-hybris] missing evdi_lindroid_buff_id\n");
+        return handle;
+    }
+
+    handle.u32 = bo->evdi_lindroid_buff_id;
     return handle;
 }
 
