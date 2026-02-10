@@ -155,30 +155,27 @@ struct gbm_bo* hybris_gbm_bo_create(struct gbm_device* device, uint32_t width, u
     cmd.stride = &stride;
     cmd.id = &bo->evdi_lindroid_buff_id;
     int ret = ioctl(device->v0.fd, DRM_IOCTL_EVDI_GBM_CREATE_BUFF, &cmd);
+    if (ret < 0) {
+        fprintf(stderr, "[libgbm-hybris] DRM_IOCTL_EVDI_GBM_CREATE_BUFF failed: %s\n", strerror(errno));
+        free(bo);
+        return NULL;
+    }
 
     bo->base.v0.stride = stride * 4;
-    bo->base.v0.handle.u32 = hybris_gbm_bo_get_fd(&bo->base);
+    bo->base.v0.handle.u32 = (uint32_t)bo->evdi_lindroid_buff_id;
     return &bo->base;
 }
 
 static void hybris_gbm_bo_destroy(struct gbm_bo *_bo)
 {
     struct gbm_hybris_bo *bo = gbm_hybris_bo(_bo);
-//    if (bo->handle) {
-  //      hybris_gralloc_release(bo->handle, 1);
     struct drm_evdi_gbm_del_buff close_args = {
         .id = bo->evdi_lindroid_buff_id
     };
 
-//    if (ioctl(bo->base.gbm->v0.fd, DRM_IOCTL_EVDI_GBM_DEL_BUFF, &close_args) < 0) {
-  //      perror("[libgbm-hybris] DRM_IOCTL_GEM_CLOSE failed");
-    //} else {
-//        printf("[libgbm-hybris]  Released GEM buffer with handle %u\n",  bo->evdi_lindroid_buff_id);
-  //  }
-//    native_handle_close(bo->handle);
-//    native_handle_delete(bo->handle);
-//}
-    close(_bo->v0.handle.u32);
+    if (ioctl(bo->base.gbm->v0.fd, DRM_IOCTL_EVDI_GBM_DEL_BUFF, &close_args) < 0) {
+        perror("[libgbm-hybris] DRM_IOCTL_EVDI_GBM_DEL_BUFF failed");
+    }
     free(bo);
 }
 
@@ -300,7 +297,7 @@ int hybris_gbm_bo_get_fd(struct gbm_bo* _bo) {
 static union gbm_bo_handle hybris_gbm_bo_get_handle_for_plane(struct gbm_bo *_bo, int plane)
 {
     union gbm_bo_handle handle;
-    handle.u32 = hybris_gbm_bo_get_fd(_bo);
+    handle.u32 = _bo->v0.handle.u32;
     return handle;
 }
 
