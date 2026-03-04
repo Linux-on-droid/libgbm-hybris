@@ -151,7 +151,7 @@ struct gbm_bo* hybris_gbm_bo_create(struct gbm_device* device, uint32_t width, u
     struct drm_evdi_gbm_create_buff cmd;
     cmd.width = width;
     cmd.height = height;
-    cmd.format = HAL_PIXEL_FORMAT_RGBA_8888;
+    cmd.format = get_hal_pixel_format(format);
     cmd.stride = &stride;
     cmd.id = &bo->evdi_lindroid_buff_id;
     int ret = ioctl(device->v0.fd, DRM_IOCTL_EVDI_GBM_CREATE_BUFF, &cmd);
