@@ -29,7 +29,7 @@
 #define DRM_IOCTL_EVDI_GBM_DEL_BUFF DRM_IOWR(DRM_COMMAND_BASE +  \
 	DRM_EVDI_GBM_DEL_BUFF, struct drm_evdi_gbm_del_buff)
 
-#define DRM_IOCTL_EVDI_GBM_ADD_BUFF DRM_IOWR(0x40 +  \
+#define DRM_IOCTL_EVDI_GBM_ADD_BUFF DRM_IOWR(DRM_COMMAND_BASE +  \
 	DRM_EVDI_GBM_ADD_BUFF, struct drm_evdi_gbm_add_buf)
 
 #define DRM_IOCTL_EVDI_GBM_CREATE_BUFF DRM_IOWR(DRM_COMMAND_BASE +  \
@@ -70,6 +70,29 @@ int memfd_create(const char *name, unsigned int flags);
 struct gbm_hybris_bo *gbm_hybris_bo(struct gbm_bo *bo)
 {
    return (struct gbm_hybris_bo *) bo;
+}
+
+static void hybris_gbm_destroy_kernel_bo(struct gbm_hybris_bo *bo)
+{
+    struct drm_evdi_gbm_del_buff close_args;
+
+    if (!bo)
+        return;
+
+    if (bo->evdi_lindroid_buff_id <= 0)
+        return;
+
+    if (!bo->base.gbm || bo->base.gbm->v0.fd < 0)
+        goto out_clear;
+
+    close_args.id = bo->evdi_lindroid_buff_id;
+    if (ioctl(bo->base.gbm->v0.fd, DRM_IOCTL_EVDI_GBM_DEL_BUFF, &close_args) < 0 &&
+        errno != ENODEV && errno != EBADF) {
+        perror("[libgbm-hybris] DRM_IOCTL_EVDI_GBM_DEL_BUFF failed");
+    }
+
+out_clear:
+    bo->evdi_lindroid_buff_id = -1;
 }
 
 static int get_hal_pixel_format(uint32_t gbm_format)
@@ -114,20 +137,26 @@ int hybris_gbm_bo_get_fd(struct gbm_bo* _bo);
 
 struct gbm_bo* hybris_gbm_bo_create(struct gbm_device* device, uint32_t width, uint32_t height, uint32_t format, uint32_t flags, const uint64_t *modifiers, const unsigned int count) {
     if (!device) {
+        errno = EINVAL;
         fprintf(stderr, "[libgbm-hybris] Invalid GBM device.\n");
         return NULL;
     }
 
-    struct gbm_hybris_bo *bo;
-    bo = calloc(1, sizeof(struct gbm_hybris_bo));
+    if (device->v0.fd < 0 || !core) {
+        errno = EINVAL;
+        fprintf(stderr, "[libgbm-hybris] Invalid GBM backend state.\n");
+        return NULL;
+    }
 
-    // Not inited in libgbm?
-    bo->base.v0.user_data = NULL;
-
+    struct gbm_hybris_bo *bo = calloc(1, sizeof(struct gbm_hybris_bo));
     if (!bo) {
+        errno = ENOMEM;
         fprintf(stderr, "[libgbm-hybris] Failed to allocate memory for GBM buffer object.\n");
         return NULL;
     }
+
+    bo->evdi_lindroid_buff_id = -1;
+    bo->base.v0.user_data = NULL;
 
     format = core->v0.format_canonicalize(format);
 
@@ -137,18 +166,10 @@ struct gbm_bo* hybris_gbm_bo_create(struct gbm_device* device, uint32_t width, u
     bo->base.v0.height = height;
     bo->base.v0.format = format;
 
-    int usage = 0;
-
-    if (flags & GBM_BO_USE_SCANOUT)
-        usage |= GRALLOC_USAGE_HW_FB;
-    if (flags & GBM_BO_USE_RENDERING)
-        usage |= GRALLOC_USAGE_HW_RENDER;
-    if (flags & GBM_BO_USE_LINEAR)
-        usage |= GRALLOC_USAGE_SW_READ_RARELY | GRALLOC_USAGE_SW_WRITE_RARELY;
-
-    int stride = 0;
-    buffer_handle_t handle = NULL;
+    uint32_t stride = 0;
+    uint64_t byte_stride;
     struct drm_evdi_gbm_create_buff cmd;
+    memset(&cmd, 0, sizeof(cmd));
     cmd.width = width;
     cmd.height = height;
     cmd.format = get_hal_pixel_format(format);
@@ -161,28 +182,45 @@ struct gbm_bo* hybris_gbm_bo_create(struct gbm_device* device, uint32_t width, u
         return NULL;
     }
 
-    bo->base.v0.stride = stride * 4;
+    if (bo->evdi_lindroid_buff_id <= 0 || stride == 0) {
+        fprintf(stderr,
+                "[libgbm-hybris] Invalid CREATE_BUFF reply: id=%d stride=%u\n",
+                bo->evdi_lindroid_buff_id, stride);
+        hybris_gbm_destroy_kernel_bo(bo);
+        free(bo);
+        errno = EIO;
+        return NULL;
+    }
+
+    byte_stride = (uint64_t)stride * 4u;
+    if (byte_stride == 0 || byte_stride > UINT32_MAX) {
+        fprintf(stderr, "[libgbm-hybris] Computed byte stride overflow: stride=%u\n", stride);
+        hybris_gbm_destroy_kernel_bo(bo);
+        free(bo);
+        errno = EOVERFLOW;
+        return NULL;
+    }
+
+    bo->base.v0.stride = (uint32_t)byte_stride;
+
     bo->base.v0.handle.u32 = (uint32_t)bo->evdi_lindroid_buff_id;
     return &bo->base;
 }
 
 static void hybris_gbm_bo_destroy(struct gbm_bo *_bo)
 {
-    struct gbm_hybris_bo *bo = gbm_hybris_bo(_bo);
-    struct drm_evdi_gbm_del_buff close_args = {
-        .id = bo->evdi_lindroid_buff_id
-    };
+    if (!_bo)
+        return;
 
-    if (ioctl(bo->base.gbm->v0.fd, DRM_IOCTL_EVDI_GBM_DEL_BUFF, &close_args) < 0) {
-        perror("[libgbm-hybris] DRM_IOCTL_EVDI_GBM_DEL_BUFF failed");
-    }
+    struct gbm_hybris_bo *bo = gbm_hybris_bo(_bo);
+    hybris_gbm_destroy_kernel_bo(bo);
     free(bo);
 }
 
 
 static void hybris_gbm_device_destroy(struct gbm_device *device)
 {
-    if(device->v0.fd)
+    if (device && device->v0.fd >= 0)
         close(device->v0.fd);
     free(device);
 }
@@ -218,9 +256,15 @@ uint32_t hybris_gbm_bo_get_stride(struct gbm_bo* bo, int plane) {
 
 uint32_t hybris_gbm_bo_get_stride_for_plane(struct gbm_bo *bo, int plane)
 {
-//TBD
-   printf("[libgbm-hybris] gbm_bo_get_stride_for_plane called\n");
-   return 0;
+    if (!bo) {
+        errno = EINVAL;
+        return 0;
+    }
+    if (plane != 0) {
+        errno = EINVAL;
+        return 0;
+    }
+    return hybris_gbm_bo_get_stride(bo, plane);
 }
 
 uint64_t hybris_gbm_bo_get_modifier(struct gbm_bo* bo) {
@@ -257,17 +301,26 @@ void hybris_gbm_surface_release_buffer(struct gbm_surface* surface, struct gbm_b
 
 int hybris_gbm_bo_get_fd(struct gbm_bo* _bo) {
     if(!_bo) {
+        errno = EINVAL;
         printf("[libgbm-hybris] gbm_bo_get_fd missing bo\n");
         return -1;
     }
 
     struct gbm_hybris_bo *bo = gbm_hybris_bo(_bo);
     if(!bo) {
+        errno = EINVAL;
         printf("[libgbm-hybris] gbm_bo_get_fd missing bo->handle\n");
         return -1;
     }
 
-    if(bo->evdi_lindroid_buff_id == -1) {
+    if (!_bo->gbm || _bo->gbm->v0.fd < 0) {
+        errno = EBADF;
+        printf("[libgbm-hybris] invalid gbm device/fd\n");
+        return -1;
+    }
+
+    if (bo->evdi_lindroid_buff_id <= 0) {
+        errno = EINVAL;
         printf("[libgbm-hybris] missing evdi_lindroid_buff_id\n");
         return -1;
     }
@@ -279,13 +332,20 @@ int hybris_gbm_bo_get_fd(struct gbm_bo* _bo) {
         return -1;
     }
 
-    if(write(fd, &bo->evdi_lindroid_buff_id, sizeof(int)) != sizeof(int)) {
+    if (write(fd, &bo->evdi_lindroid_buff_id, sizeof(int)) != (ssize_t)sizeof(int)) {
+        errno = EIO;
         printf("[libgbm-hybris] failed to write evdi_lindroid_buff_id into mefd\n");
         close(fd);
         return -1;
     }
 
     const size_t size = (size_t)bo->base.v0.stride * bo->base.v0.height;
+    if (size < sizeof(int)) {
+        errno = EINVAL;
+        close(fd);
+        return -1;
+    }
+
     if (ftruncate(fd, size) < 0) {
         close(fd);
         return -1;
