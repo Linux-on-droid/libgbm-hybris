@@ -1,7 +1,9 @@
 #include <fcntl.h> 
 #include <stddef.h>
 #include <xf86drm.h>
+#include <drm/drm_fourcc.h>
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -51,8 +53,11 @@ struct gbm_hybris_bo {
 };
 
 struct gbm_hybris_surface {
-   void *reserved_for_egl_gbm;
-   struct gbm_surface base;
+    struct gbm_surface base;
+    struct gbm_hybris_bo *front_bo;
+    bool front_locked;
+    struct gbm_hybris_bo *bo[16];
+    unsigned int bo_count;
 };
 
 struct drm_evdi_gbm_create_buff {
@@ -64,6 +69,12 @@ struct drm_evdi_gbm_create_buff {
 };
 
 static const struct gbm_core *core;
+
+struct gbm_surface *hybris_gbm_surface_create(struct gbm_device *gbm,
+					      uint32_t width, uint32_t height,
+					      uint32_t format, uint32_t flags,
+					      const uint64_t *modifiers,
+					      const unsigned count);
 
 int memfd_create(const char *name, unsigned int flags);
 
@@ -232,14 +243,13 @@ struct gbm_bo *hybris_gbm_bo_create_with_modifiers(struct gbm_device *gbm,
                              const uint64_t *modifiers,
                              const unsigned int count)
 {
-//TBD: it do not work that way :D
-   return NULL;
+   /* Force linear: ignore modifier list and allocate a normal BO */
+   return hybris_gbm_bo_create(gbm, width, height, format, 0, NULL, 0);
 }
 
 struct gbm_bo * hybris_gbm_bo_create_with_modifiers2(struct gbm_device *gbm, uint32_t width, uint32_t height, uint32_t format, const uint64_t *modifiers, const unsigned int count, uint32_t flags){
-//TBD
-    printf("[libgbm-hybris] gbm_bo_create_with_modifiers2\n");
-    return NULL;
+    /* Force linear: ignore modifier list and allocate a normal BO */
+    return hybris_gbm_bo_create(gbm, width, height, format, flags, NULL, 0);
 }
 
 struct gbm_bo *hybris_gbm_bo_import(struct gbm_device *gbm, uint32_t type, void *buffer, uint32_t usage){
@@ -268,9 +278,7 @@ uint32_t hybris_gbm_bo_get_stride_for_plane(struct gbm_bo *bo, int plane)
 }
 
 uint64_t hybris_gbm_bo_get_modifier(struct gbm_bo* bo) {
-//TBD: Implement modifier
-//    printf("[libgbm-hybris] gbm_bo_get_modifier called\n");
-    return 0;
+    return DRM_FORMAT_MOD_LINEAR;
 }
 
 void* hybris_gbm_bo_map(struct gbm_bo *bo, uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t flags, uint32_t *stride, void **map_data) {
@@ -280,23 +288,51 @@ void* hybris_gbm_bo_map(struct gbm_bo *bo, uint32_t x, uint32_t y, uint32_t widt
 }
 
 void hybris_gbm_surface_destroy(struct gbm_surface *surf) {
-//TBD: Implement surfaces
-    printf("[libgbm-hybris] gbm_surface_destroy called\n");
+    struct gbm_hybris_surface *hsurf = (struct gbm_hybris_surface *)surf;
+    int i;
+
+    if (!hsurf)
+        return;
+
+    // We own nothing
+    free(hsurf);
 }
 
+int hybris_gbm_surface_has_free_buffers(struct gbm_surface *surface)
+{
+    struct gbm_hybris_surface *hsurf = (struct gbm_hybris_surface *)surface;
+
+    if(hsurf->front_locked)
+        return 1;
+
+    return 0;
+}
 
 struct gbm_bo* hybris_gbm_surface_lock_front_buffer(struct gbm_surface* surface) {
-//TBD: Implement surfaces
-    printf("[libgbm-hybris] gbm_surface_lock_front_buffer called\n");
-    return (struct gbm_bo*)malloc(sizeof(struct gbm_bo));
+    struct gbm_hybris_surface *hsurf = (struct gbm_hybris_surface *)surface;
+
+    if (!hsurf || !hsurf->front_bo) {
+        errno = EAGAIN;
+        return NULL;
+    }
+
+    if (hsurf->front_locked) {
+        errno = EAGAIN;
+        return NULL;
+    }
+
+    hsurf->front_locked = true;
+    return &hsurf->front_bo->base;
 }
 
 void hybris_gbm_surface_release_buffer(struct gbm_surface* surface, struct gbm_bo* bo) {
-//TBD: Implement surfaces
-    printf("[libgbm-hybris] gbm_surface_release_buffer called\n");
-    if (bo) {
-        free(bo);
-    }
+    struct gbm_hybris_surface *hsurf = (struct gbm_hybris_surface *)surface;
+
+    if (!hsurf || !bo)
+        return;
+
+    if (hsurf->front_bo == (struct gbm_hybris_bo *)bo)
+        hsurf->front_locked = false;
 }
 
 int hybris_gbm_bo_get_fd(struct gbm_bo* _bo) {
@@ -363,9 +399,7 @@ static union gbm_bo_handle hybris_gbm_bo_get_handle_for_plane(struct gbm_bo *_bo
 
 int hybris_gbm_bo_get_plane_count(struct gbm_bo *bo)
 {
-//TBD and rename to bo_get_planes
-//   printf("[libgbm-hybris] gbm_bo_get_plane_count called\n");
-   return 1;
+    return 1;
 }
 
 int hybris_gbm_bo_get_fd_for_plane(struct gbm_bo *bo, int plane)
@@ -386,46 +420,50 @@ uint32_t hybris_bo_get_offset(struct gbm_bo *bo, int plane)
 }
 
 struct gbm_surface *hybris_gbm_surface_create_with_modifiers(struct gbm_device *gbm, uint32_t width, uint32_t height, uint32_t format, const uint64_t *modifiers, const unsigned int count){
-//TBD: Implement surfaces
    printf("[libgbm-hybris] gbm_surface_create_with_modifiers\n");
    if ((count && !modifiers) || (modifiers && !count)) {
       errno = EINVAL;
       return NULL;
    }
 
-   return NULL;
+   return hybris_gbm_surface_create(gbm, width, height, format, 0, modifiers, count);
 }
 
 struct gbm_surface *hybris_gbm_surface_create(struct gbm_device *gbm, uint32_t width, uint32_t height, uint32_t format, uint32_t flags, const uint64_t *modifiers, const unsigned count) {
-//TBD: Implement surfaces
-    printf("[libgbm-hybris] gbm_surface_create called with width: %u, height: %u, format: %u, flags: %u\n", width, height, format, flags);
     struct gbm_hybris_surface *surf;
+    uint32_t canon_format = format;
+
+    printf("[libgbm-hybris] gbm_surface_create called with width: %u, height: %u, format: %u, flags: %u\n", width, height, format, flags);
+
     surf = calloc(1, sizeof *surf);
     if (surf == NULL) {
         errno = ENOMEM;
         return NULL;
     }
 
+    if (core && core->v0.format_canonicalize) {
+        canon_format = core->v0.format_canonicalize(format);
+    }
+
     surf->base.gbm = gbm;
     surf->base.v0.width = width;
     surf->base.v0.height = height;
-    surf->base.v0.format = get_hal_pixel_format(format);
+    surf->base.v0.format = canon_format;
     surf->base.v0.flags = flags;
-    surf->base.v0.modifiers = calloc(count, sizeof(*modifiers));
-    if (count && !surf->base.v0.modifiers) {
-        errno = ENOMEM;
-        free(surf);
-        return NULL;
-    }
+    surf->base.v0.modifiers = NULL;
+    surf->base.v0.count = 0;
 
-    //uint64_t *v0_modifiers = surf->base.v0.modifiers;
-    //for (int i = 0; i < count; i++) {
-        // compressed buffers don't render correctly when imported
-      //  if (modifiers[i] & ~DRM_FORMAT_MOD_NVIDIA_BLOCK_LINEAR_2D(0x0, 0x1, 0x3, 0xff, 0xf))
-      //      continue;
-      //  *v0_modifiers++ = modifiers[i];
-    //}
-    //surf->base.v0.count = v0_modifiers - surf->base.v0.modifiers;
+    if (count) {
+	// Force linear
+        surf->base.v0.modifiers = calloc(1, sizeof(uint64_t));
+        if (!surf->base.v0.modifiers) {
+            errno = ENOMEM;
+            free(surf);
+            return NULL;
+        }
+        surf->base.v0.modifiers[0] = DRM_FORMAT_MOD_LINEAR;
+        surf->base.v0.count = 1;
+    }
 
     return &surf->base;
 }
@@ -436,6 +474,10 @@ void hybris_gbm_bo_unmap(struct gbm_bo* bo, void* map_data) {
     if (map_data) {
         free(map_data);
     }
+}
+
+int hybris_gbm_bo_write(struct gbm_bo *bo, const void *buf, size_t count){
+    return 0;
 }
 
 char *hybris_gbm_format_get_name(uint32_t gbm_format, struct gbm_format_name_desc *desc)
@@ -477,7 +519,12 @@ static struct gbm_device *hybris_device_create(int fd, uint32_t gbm_backend_vers
    device->v0.bo_get_planes = hybris_gbm_bo_get_plane_count;
    device->v0.bo_get_plane_fd = hybris_gbm_bo_get_fd_for_plane;
    device->v0.surface_create = hybris_gbm_surface_create;
+   device->v0.surface_destroy = hybris_gbm_surface_destroy;
+   device->v0.surface_lock_front_buffer = hybris_gbm_surface_lock_front_buffer;
+   device->v0.surface_release_buffer = hybris_gbm_surface_release_buffer;
+   device->v0.surface_has_free_buffers = hybris_gbm_surface_has_free_buffers;
    device->v0.bo_get_offset = hybris_bo_get_offset;
+   device->v0.bo_write = hybris_gbm_bo_write;
    return device;
 }
 
