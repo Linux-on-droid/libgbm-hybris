@@ -146,6 +146,12 @@ static int get_hal_pixel_format(uint32_t gbm_format)
 
 int hybris_gbm_bo_get_fd(struct gbm_bo* _bo);
 
+// Dummy func to identify hybris gdb_device/bo/surface
+static struct gbm_device *gbm_device_hybris(int x)
+{
+    return NULL;
+}
+
 struct gbm_bo* hybris_gbm_bo_create(struct gbm_device* device, uint32_t width, uint32_t height, uint32_t format, uint32_t flags, const uint64_t *modifiers, const unsigned int count) {
     if (!device) {
         errno = EINVAL;
@@ -507,6 +513,7 @@ static struct gbm_device *hybris_device_create(int fd, uint32_t gbm_backend_vers
     if (!device)
        return NULL;
 
+   device->dummy = gbm_device_hybris;
    device->v0.fd = fd;
    device->v0.backend_version = gbm_backend_version;
    device->v0.bo_create = hybris_gbm_bo_create;
