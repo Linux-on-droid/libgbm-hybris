@@ -234,14 +234,10 @@ static void hybris_gbm_bo_destroy(struct gbm_bo *_bo)
     free(bo);
 }
 
-
 static void hybris_gbm_device_destroy(struct gbm_device *device)
 {
-    if (device && device->v0.fd >= 0)
-        close(device->v0.fd);
     free(device);
 }
-
 
 struct gbm_bo *hybris_gbm_bo_create_with_modifiers(struct gbm_device *gbm,
                              uint32_t width, uint32_t height,
